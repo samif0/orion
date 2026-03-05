@@ -23,6 +23,9 @@ class WindowAttention:
             raise ValueError("WindowAttention requires attention.window_size to be set in config")
         self.cfg = cfg
         self.W = cfg.window_size
+        # Cache the mask so it's only built once per (T, device, dtype) combination
+        # instead of being reallocated on every forward pass.
+        self._mask_cache: dict[tuple, torch.Tensor] = {}
 
     def forward(
         self, q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *, attn_mask=None
@@ -37,7 +40,10 @@ class WindowAttention:
             out: [B, H, T, Dh]
         """
         _B, _H, T, _Dh = q.shape
-        mask = _build_window_mask(T, self.W, device=q.device, dtype=q.dtype)
+        cache_key = (T, q.device, q.dtype)
+        if cache_key not in self._mask_cache:
+            self._mask_cache[cache_key] = _build_window_mask(T, self.W, device=q.device, dtype=q.dtype)
+        mask = self._mask_cache[cache_key]
         return F.scaled_dot_product_attention(q, k, v, attn_mask=mask)
 
 
